@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Consolidador CTe → Excel</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        h1 { color: #333; margin-bottom: 10px; font-size: 28px; }
+        .subtitle { color: #666; margin-bottom: 30px; font-size: 14px; }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 8px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background-color: #f8f9ff;
+            margin-bottom: 20px;
+        }
+
+        .upload-area:hover { border-color: #764ba2; background-color: #f0f1ff; }
+        .upload-area.dragover { border-color: #764ba2; background-color: #ede9f6; transform: scale(1.02); }
+        .upload-icon { font-size: 48px; margin-bottom: 15px; }
+        .upload-text { color: #333; font-weight: 500; margin-bottom: 5px; }
+        .upload-subtext { color: #999; font-size: 12px; }
+        input[type="file"] { display: none; }
+
+        .button-group { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+
+        button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            flex: 1;
+            min-width: 120px;
+        }
+        .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-secondary { background: #f0f0f0; color: #333; flex: 1; min-width: 120px; }
+        .btn-secondary:hover:not(:disabled) { background: #e0e0e0; }
+
+        .btn-success {
+            background: linear-gradient(135deg, #34a853 0%, #1f9c3f 100%);
+            color: white;
+            flex: 1;
+            min-width: 120px;
+        }
+        .btn-success:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(52, 168, 83, 0.3); }
+        .btn-success:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .file-list {
+            background: #f8f9ff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        .file-list h3 { color: #333; font-size: 14px; margin-bottom: 15px; text-transform: uppercase; font-weight: 600; }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .file-name { color: #333; font-weight: 500; flex: 1; word-break: break-word; }
+        .file-status {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            white-space: nowrap;
+            margin-left: 10px;
+        }
+        .status-cte { background: #d1ecf1; color: #0c5460; }
+        .status-evento { background: #fff3cd; color: #856404; }
+
+        .progress-section { margin-bottom: 20px; }
+        .progress-bar { width: 100%; height: 8px; background: #e9ecef; border-radius: 4px; overflow: hidden; margin-bottom: 10px; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); width: 0%; transition: width 0.3s ease; }
+        .progress-text { font-size: 12px; color: #666; text-align: center; }
+
+        .message-box { padding: 15px; border-radius: 6px; margin-bottom: 20px; display: none; white-space: pre-line; }
+        .message-box.show { display: block; }
+        .message-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .message-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+
+        .hidden { display: none; }
+
+        .results-box {
+            background: #f0f7ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: none;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .results-box.show { display: block; }
+        .results-box h3 { color: #333; font-size: 14px; margin-bottom: 15px; text-transform: uppercase; font-weight: 600; }
+        .result-item { padding: 10px; background: white; border-radius: 6px; margin-bottom: 8px; font-size: 13px; border-left: 4px solid #667eea; }
+        .result-name { color: #333; font-weight: 500; }
+        .result-detail { font-size: 11px; color: #999; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Consolidador CTe</h1>
+        <p class="subtitle">XMLs → Excel por CNPJ + Série (layout LogCTe)</p>
+
+        <div class="message-box message-error" id="errorMessage"></div>
+        <div class="message-box message-success" id="successMessage"></div>
+
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <div class="upload-text">Clique ou arraste arquivos aqui</div>
+            <div class="upload-subtext">Formatos: .zip com XMLs ou XMLs individuais (CTe + Eventos)</div>
+            <input type="file" id="fileInput" multiple accept=".xml,.zip">
+        </div>
+
+        <div class="button-group">
+            <button class="btn-primary" id="selectBtn">📁 Selecionar</button>
+            <button class="btn-secondary" id="clearBtn" disabled>🗑️ Limpar</button>
+            <button class="btn-primary" id="processBtn" disabled>⚙️ Processar</button>
+        </div>
+
+        <div id="fileListContainer" class="hidden">
+            <div class="file-list">
+                <h3>📄 Arquivos</h3>
+                <div id="fileList"></div>
+            </div>
+        </div>
+
+        <div id="progressContainer" class="progress-section hidden">
+            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+            <div class="progress-text"><span id="progressText">0%</span></div>
+        </div>
+
+        <div id="resultsBox" class="results-box">
+            <h3>✅ Arquivos Processados</h3>
+            <div id="resultsList"></div>
+        </div>
+
+        <div class="button-group">
+            <button class="btn-success" id="downloadAllBtn" disabled>⬇️ Baixar Todos (ZIP)</button>
+        </div>
+    </div>
+
+    <script>
+        const state = {
+            files: [],
+            ctes: new Map(),
+            eventos: [],
+            cancelados: new Set(),
+            generatedFiles: [],
+            buffers: new Map(),
+            avisos: new Set()
+        };
+
+        const elements = {
+            uploadArea: document.getElementById('uploadArea'),
+            fileInput: document.getElementById('fileInput'),
+            selectBtn: document.getElementById('selectBtn'),
+            clearBtn: document.getElementById('clearBtn'),
+            processBtn: document.getElementById('processBtn'),
+            downloadAllBtn: document.getElementById('downloadAllBtn'),
+            fileList: document.getElementById('fileList'),
+            fileListContainer: document.getElementById('fileListContainer'),
+            progressContainer: document.getElementById('progressContainer'),
+            progressFill: document.getElementById('progressFill'),
+            progressText: document.getElementById('progressText'),
+            errorMessage: document.getElementById('errorMessage'),
+            successMessage: document.getElementById('successMessage'),
+            resultsBox: document.getElementById('resultsBox'),
+            resultsList: document.getElementById('resultsList')
+        };
+
+        elements.selectBtn.addEventListener('click', () => elements.fileInput.click());
+        elements.uploadArea.addEventListener('click', () => elements.fileInput.click());
+        elements.uploadArea.addEventListener('dragover', e => { e.preventDefault(); elements.uploadArea.classList.add('dragover'); });
+        elements.uploadArea.addEventListener('dragleave', () => elements.uploadArea.classList.remove('dragover'));
+        elements.uploadArea.addEventListener('drop', e => {
+            e.preventDefault();
+            elements.uploadArea.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+        elements.fileInput.addEventListener('change', e => handleFiles(e.target.files));
+        elements.clearBtn.addEventListener('click', clearAll);
+        elements.processBtn.addEventListener('click', processFiles);
+        elements.downloadAllBtn.addEventListener('click', downloadAllAsZip);
+
+        function handleFiles(files) {
+            state.files = Array.from(files);
+            updateFileList();
+            updateUI();
+            clearMessages();
+        }
+
+        function updateFileList() {
+            elements.fileList.innerHTML = '';
+            state.files.forEach(file => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                const isEvento = file.name.toLowerCase().includes('evento') || file.name.toLowerCase().includes('-ev');
+                fileItem.innerHTML = `
+                    <span class="file-name">${file.name}</span>
+                    <span class="file-status ${isEvento ? 'status-evento' : 'status-cte'}">
+                        ${isEvento ? '⚠️ Evento' : '📋 CTe'}
+                    </span>
+                `;
+                elements.fileList.appendChild(fileItem);
+            });
+            elements.fileListContainer.classList.toggle('hidden', state.files.length === 0);
+        }
+
+        function updateUI() {
+            const hasFiles = state.files.length > 0;
+            const hasGenerated = state.generatedFiles.length > 0;
+            elements.clearBtn.disabled = !hasFiles;
+            elements.processBtn.disabled = !hasFiles;
+            elements.downloadAllBtn.disabled = !hasGenerated;
+        }
+
+        function clearAll() {
+            state.files = [];
+            state.ctes.clear();
+            state.eventos = [];
+            state.cancelados.clear();
+            state.generatedFiles = [];
+            state.buffers.clear();
+            state.avisos.clear();
+            elements.fileInput.value = '';
+            updateFileList();
+            updateUI();
+            elements.progressContainer.classList.add('hidden');
+            elements.resultsBox.classList.remove('show');
+            clearMessages();
+        }
+
+        function clearMessages() {
+            elements.errorMessage.classList.remove('show');
+            elements.successMessage.classList.remove('show');
+        }
+
+        function showError(message) {
+            elements.errorMessage.textContent = message;
+            elements.errorMessage.classList.add('show');
+        }
+
+        function showSuccess(message) {
+            elements.successMessage.textContent = message;
+            elements.successMessage.classList.add('show');
+        }
+
+        function updateProgress(percent) {
+            elements.progressFill.style.width = percent + '%';
+            elements.progressText.textContent = Math.round(percent) + '%';
+        }
+
+        async function processFiles() {
+            clearMessages();
+            state.ctes.clear();
+            state.eventos = [];
+            state.cancelados.clear();
+            state.generatedFiles = [];
+            state.buffers.clear();
+            state.avisos.clear();
+            elements.progressContainer.classList.remove('hidden');
+            elements.resultsBox.classList.remove('show');
+
+            try {
+                for (let i = 0; i < state.files.length; i++) {
+                    const file = state.files[i];
+                    const isZip = file.name.toLowerCase().endsWith('.zip');
+                    const isXml = file.name.toLowerCase().endsWith('.xml');
+
+                    if (isZip) {
+                        await processZipFile(file);
+                    } else if (isXml) {
+                        await processXmlFile(file);
+                    }
+
+                    updateProgress((i + 1) / state.files.length * 30);
+                }
+
+                processarCancelamentos();
+                updateProgress(50);
+
+                await gerarArquivosExcel();
+                updateProgress(100);
+
+                updateUI();
+                mostrarResultados();
+
+                let msg = `✅ ${state.generatedFiles.length} arquivo(s) gerado(s) | ${state.ctes.size} CTe(s) | ${state.cancelados.size} cancelado(s) via evento`;
+                if (state.avisos.size > 0) {
+                    msg += `\n⚠️ ${state.avisos.size} arquivo(s) com dados incompletos (veja console: F12)`;
+                }
+                showSuccess(msg);
+            } catch (error) {
+                showError(`❌ Erro: ${error.message}`);
+                console.error(error);
+            }
+        }
+
+        async function processZipFile(file) {
+            try {
+                const zip = await JSZip.loadAsync(file);
+                const xmlFiles = Object.keys(zip.files).filter(name => name.toLowerCase().endsWith('.xml'));
+                for (const xmlFileName of xmlFiles) {
+                    const xmlContent = await zip.files[xmlFileName].async('string');
+                    parseXml(xmlContent, xmlFileName);
+                }
+            } catch (error) {
+                showError(`Erro ao processar ZIP: ${error.message}`);
+            }
+        }
+
+        async function processXmlFile(file) {
+            try {
+                const xmlContent = await file.text();
+                parseXml(xmlContent, file.name);
+            } catch (error) {
+                showError(`Erro ao processar XML: ${error.message}`);
+            }
+        }
+
+        function getText(parent, tag) {
+            if (!parent) return '';
+            const el = parent.getElementsByTagName(tag)[0];
+            return el ? el.textContent.trim() : '';
+        }
+
+        function getNum(parent, tag) {
+            const v = getText(parent, tag);
+            return v ? (parseFloat(v) || 0) : 0;
+        }
+
+        function parseXml(xmlContent, fileName) {
+            try {
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
+                if (xmlDoc.getElementsByTagName('parsererror').length > 0) return;
+
+                const descEvento = xmlDoc.getElementsByTagName('descEvento')[0];
+                if (descEvento) {
+                    parseEvento(xmlDoc, fileName);
+                } else {
+                    parseCte(xmlDoc, fileName);
+                }
+            } catch (error) {
+                console.error(`Erro ao fazer parse de ${fileName}:`, error);
+            }
+        }
+
+        // Extrai a primeira placa citada em xObs, aceitando "PLACA:" ou "VEICULO:"
+        // (considera apenas a primeira ocorrência = tracionador)
+        function extrairPlacaTracionador(xObsText) {
+            if (!xObsText) return '';
+            const m = xObsText.match(/(?:PLACA|VEICULO)\s*:?\s*([A-Za-z0-9][A-Za-z0-9\-]{4,7})/i);
+            if (!m) return '';
+            return m[1].replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        }
+
+        function formatarDataISO(dhEmi) {
+            if (!dhEmi || dhEmi.length < 10) return null;
+            const [ano, mes, dia] = dhEmi.substring(0, 10).split('-').map(Number);
+            return new Date(ano, mes - 1, dia);
+        }
+
+        function formatarCNPJ(cnpj) {
+            const c = (cnpj || '').replace(/\D/g, '');
+            if (c.length !== 14) return cnpj || '';
+            return c.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+        }
+
+        // Busca BC ICMS / Valor ICMS de forma robusta, escopando dentro do
+        // grupo <ICMS> (evita pegar vBC do grupo IBSCBS, que é outro imposto)
+        function extrairIcms(xmlDoc) {
+            const imp = xmlDoc.getElementsByTagName('imp')[0];
+            const icms = imp ? imp.getElementsByTagName('ICMS')[0] : xmlDoc.getElementsByTagName('ICMS')[0];
+            if (!icms) return { bc: 0, valor: 0 };
+
+            let bc = getNum(icms, 'vBC');
+            let valor = getNum(icms, 'vICMS');
+            if (bc || valor) return { bc, valor };
+
+            bc = getNum(icms, 'vBCSTRet');
+            valor = getNum(icms, 'vICMSSTRet');
+            if (bc || valor) return { bc, valor };
+
+            bc = getNum(icms, 'vBCOutraUF');
+            valor = getNum(icms, 'vICMSOutraUF');
+            return { bc, valor };
+        }
+
+        function parseCte(xmlDoc, fileName) {
+            try {
+                const infCte = xmlDoc.getElementsByTagName('infCte')[0];
+                if (!infCte) return;
+
+                const ide = xmlDoc.getElementsByTagName('ide')[0];
+                const emit = xmlDoc.getElementsByTagName('emit')[0];
+                const rem = xmlDoc.getElementsByTagName('rem')[0];
+                const dest = xmlDoc.getElementsByTagName('dest')[0];
+
+                const chave = (infCte.getAttribute('Id') || '').replace(/^CTe/i, '');
+
+                const cnpjEmit = getText(emit, 'CNPJ');
+                const xNomeEmit = getText(emit, 'xNome');
+
+                const serie = getText(ide, 'serie') || '1';
+                const numero = getText(ide, 'nCT');
+                const data = formatarDataISO(getText(ide, 'dhEmi'));
+
+                const xMunIni = getText(ide, 'xMunIni');
+                const ufIni = getText(ide, 'UFIni');
+                const xMunFim = getText(ide, 'xMunFim');
+                const ufFim = getText(ide, 'UFFim');
+                const origem = xMunIni ? `${xMunIni} / ${ufIni}` : '';
+                const destino = xMunFim ? `${xMunFim} / ${ufFim}` : '';
+
+                const placa = extrairPlacaTracionador(getText(xmlDoc, 'xObs'));
+
+                const cnpjRem = getText(rem, 'CNPJ');
+                const xNomeRem = getText(rem, 'xNome');
+                const cnpjDest = getText(dest, 'CNPJ');
+                const xNomeDest = getText(dest, 'xNome');
+
+                const peso = getNum(xmlDoc, 'vCarga');
+                const valor = getNum(xmlDoc, 'vRec');
+                const { bc: bcIcms, valor: valorIcms } = extrairIcms(xmlDoc);
+
+                if (!cnpjEmit || !numero || !origem || !destino) {
+                    state.avisos.add(fileName);
+                    console.warn(`Dados possivelmente incompletos em ${fileName}:`, { cnpjEmit, numero, origem, destino, placa });
+                }
+
+                const chaveUnica = `${cnpjEmit}|${serie}|${numero}|${chave}`;
+
+                state.ctes.set(chaveUnica, {
+                    chave, cnpjEmit, xNomeEmit, serie, numero, data, placa,
+                    cnpjRem: formatarCNPJ(cnpjRem), xNomeRem,
+                    cnpjDest: formatarCNPJ(cnpjDest), xNomeDest,
+                    origem, destino,
+                    peso, valor, bcIcms, valorIcms,
+                    status: 'Autorizado'
+                });
+            } catch (error) {
+                console.error(`Erro ao parsear CTe ${fileName}:`, error);
+            }
+        }
+
+        function parseEvento(xmlDoc, fileName) {
+            try {
+                const descEvento = xmlDoc.getElementsByTagName('descEvento')[0];
+                if (!descEvento) return;
+                const desc = descEvento.textContent.trim();
+                if (!desc.toLowerCase().includes('cancelamento')) return;
+
+                // A tag correta em eventos de CT-e é <chCTe>, não <refChave>
+                const chave = getText(xmlDoc, 'chCTe');
+                if (chave) {
+                    state.eventos.push({ chave, descricao: desc });
+                } else {
+                    console.warn(`Evento de cancelamento sem chCTe em ${fileName}`);
+                }
+            } catch (error) {
+                console.error(`Erro ao parsear Evento ${fileName}:`, error);
+            }
+        }
+
+        function processarCancelamentos() {
+            state.eventos.forEach(evento => {
+                for (const [key, cte] of state.ctes) {
+                    if (cte.chave === evento.chave) {
+                        cte.status = 'Cancelado';
+                        state.cancelados.add(key);
+                    }
+                }
+            });
+        }
+
+        function limparNomeArquivo(txt) {
+            return (txt || '')
+                .normalize('NFD')
+                .replace(/[̀-ͯ]/g, '')
+                .replace(/[^\w\s]/g, '')
+                .replace(/\s+/g, '_');
+        }
+
+        // ===================== GERAÇÃO DO EXCEL (layout fiel ao RelMovCTe) =====================
+
+        // Larguras de coluna extraídas do arquivo de exemplo (A..V, 22 colunas)
+        const COL_WIDTHS = [1.0, 6.86, 8.0, 3.0, 9.71, 19.57, 4.28, 12.71, 25.14, 6.86, 2.28, 5.71, 6.86, 5.71, 2.28, 8.86, 7.0, 8.0, 1.29, 4.57, 1.14, 7.86];
+
+        const FONT_TITLE = { name: 'Arial', size: 18 };
+        const FONT_LABEL10 = { name: 'Arial', size: 10 };
+        const FONT_SMALL7 = { name: 'Arial', size: 7 };
+        const FONT_8 = { name: 'Arial', size: 8 };
+
+        const ALIGN_LEFT_WRAP = { horizontal: 'left', vertical: 'middle', wrapText: true };
+        const ALIGN_LEFT = { horizontal: 'left', vertical: 'bottom' };
+        const ALIGN_RIGHT = { horizontal: 'right', vertical: 'bottom' };
+        const ALIGN_CENTER = { horizontal: 'center', vertical: 'bottom' };
+
+        const FILL_GRAY = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC0C0C0' } };
+        const NUMFMT_MONEY = '#,##0.00';
+        const NUMFMT_DATE = 'dd/mm/yyyy';
+
+        function setCell(ws, addr, value, { font, align, numFmt, fill } = {}) {
+            const cell = ws.getCell(addr);
+            cell.value = value;
+            cell.font = font || FONT_8;
+            cell.alignment = align || ALIGN_LEFT;
+            if (numFmt) cell.numFmt = numFmt;
+            if (fill) cell.fill = fill;
+            return cell;
+        }
+
+        function montarPlanilha(ws, grupo, ctesPorPlaca) {
+            ws.columns = COL_WIDTHS.map(w => ({ width: w }));
+
+            // Título
+            ws.mergeCells('B2:J5');
+            setCell(ws, 'B2', 'RELATÓRIO DE MOVIMENTAÇÃO - ANALÍTICO - VEÍCULO', { font: FONT_TITLE, align: ALIGN_LEFT_WRAP });
+
+            // CNPJ / Página
+            ws.mergeCells('L3:M3'); setCell(ws, 'L3', 'CNPJ: ', { font: FONT_LABEL10, align: ALIGN_RIGHT });
+            ws.mergeCells('N3:S3'); setCell(ws, 'N3', formatarCNPJ(grupo.cnpjEmit), { font: FONT_LABEL10, align: ALIGN_LEFT });
+            ws.mergeCells('T3:V3'); setCell(ws, 'T3', 'Página 1 de 1', { font: FONT_SMALL7, align: ALIGN_LEFT });
+
+            // Emissor
+            ws.mergeCells('L4:M4'); setCell(ws, 'L4', 'Emissor: ', { font: FONT_LABEL10, align: ALIGN_RIGHT });
+            ws.mergeCells('N4:S4'); setCell(ws, 'N4', grupo.xNomeEmit, { font: FONT_LABEL10, align: ALIGN_LEFT });
+
+            // Cabeçalho das colunas (linha 7)
+            const hdrRow = 7;
+            setCell(ws, `B${hdrRow}`, 'Numero', { align: ALIGN_LEFT });
+            setCell(ws, `C${hdrRow}`, 'Emissao', { align: ALIGN_LEFT });
+            ws.mergeCells(`D${hdrRow}:E${hdrRow}`); setCell(ws, `D${hdrRow}`, 'CNPJ', { align: ALIGN_LEFT });
+            ws.mergeCells(`F${hdrRow}:G${hdrRow}`); setCell(ws, `F${hdrRow}`, 'Remetente', { align: ALIGN_LEFT });
+            setCell(ws, `H${hdrRow}`, 'CNPJ', { align: ALIGN_LEFT });
+            setCell(ws, `I${hdrRow}`, 'Destinatário', { align: ALIGN_LEFT });
+            ws.mergeCells(`J${hdrRow}:L${hdrRow}`); setCell(ws, `J${hdrRow}`, 'Origem', { align: ALIGN_LEFT });
+            ws.mergeCells(`M${hdrRow}:O${hdrRow}`); setCell(ws, `M${hdrRow}`, 'Destino', { align: ALIGN_LEFT });
+            setCell(ws, `P${hdrRow}`, 'Peso Bruto', { align: ALIGN_RIGHT });
+            setCell(ws, `Q${hdrRow}`, 'Valor', { align: ALIGN_RIGHT });
+            setCell(ws, `R${hdrRow}`, 'BC ICMS', { align: ALIGN_RIGHT });
+            ws.mergeCells(`S${hdrRow}:U${hdrRow}`); setCell(ws, `S${hdrRow}`, 'ValorICMS', { align: ALIGN_RIGHT });
+            setCell(ws, `V${hdrRow}`, 'Status', { align: ALIGN_RIGHT });
+
+            let row = hdrRow + 1;
+            let pesoTotal = 0, valorTotal = 0, bcTotal = 0, icmsTotal = 0;
+
+            for (const [placa, ctes] of ctesPorPlaca) {
+                const subPeso = ctes.reduce((s, c) => s + c.peso, 0);
+                const subValor = ctes.reduce((s, c) => s + c.valor, 0);
+                const subBC = ctes.reduce((s, c) => s + c.bcIcms, 0);
+                const subICMS = ctes.reduce((s, c) => s + c.valorIcms, 0);
+
+                // Linha "Placa Tracionador" com fundo cinza
+                ws.mergeCells(`B${row}:D${row}`); setCell(ws, `B${row}`, 'Placa Tracionador:', { font: FONT_LABEL10, align: ALIGN_RIGHT, fill: FILL_GRAY });
+                ws.mergeCells(`E${row}:F${row}`); setCell(ws, `E${row}`, placa, { font: FONT_LABEL10, align: ALIGN_LEFT, fill: FILL_GRAY });
+                setCell(ws, `G${row}`, '', { fill: FILL_GRAY });
+                setCell(ws, `H${row}`, '', { fill: FILL_GRAY });
+                setCell(ws, `I${row}`, '', { fill: FILL_GRAY });
+                setCell(ws, `J${row}`, '', { fill: FILL_GRAY });
+                setCell(ws, `K${row}`, '', { fill: FILL_GRAY });
+                setCell(ws, `L${row}`, '', { fill: FILL_GRAY });
+                setCell(ws, `M${row}`, '', { fill: FILL_GRAY });
+                setCell(ws, `N${row}`, '', { fill: FILL_GRAY });
+                setCell(ws, `O${row}`, '', { fill: FILL_GRAY });
+                setCell(ws, `P${row}`, subPeso, { font: FONT_8, align: ALIGN_RIGHT, numFmt: NUMFMT_MONEY, fill: FILL_GRAY });
+                setCell(ws, `Q${row}`, subValor, { font: FONT_8, align: ALIGN_RIGHT, numFmt: NUMFMT_MONEY, fill: FILL_GRAY });
+                setCell(ws, `R${row}`, subBC, { font: FONT_8, align: ALIGN_RIGHT, numFmt: NUMFMT_MONEY, fill: FILL_GRAY });
+                ws.mergeCells(`S${row}:U${row}`); setCell(ws, `S${row}`, subICMS, { font: FONT_8, align: ALIGN_RIGHT, numFmt: NUMFMT_MONEY, fill: FILL_GRAY });
+                setCell(ws, `V${row}`, '', { fill: FILL_GRAY });
+                row++;
+
+                ctes.forEach(cte => {
+                    setCell(ws, `B${row}`, cte.numero, { align: ALIGN_CENTER });
+                    setCell(ws, `C${row}`, cte.data, { align: ALIGN_LEFT, numFmt: NUMFMT_DATE });
+                    ws.mergeCells(`D${row}:E${row}`); setCell(ws, `D${row}`, cte.cnpjRem, { align: ALIGN_LEFT });
+                    ws.mergeCells(`F${row}:G${row}`); setCell(ws, `F${row}`, cte.xNomeRem, { align: ALIGN_LEFT });
+                    setCell(ws, `H${row}`, cte.cnpjDest, { align: ALIGN_LEFT });
+                    setCell(ws, `I${row}`, cte.xNomeDest, { align: ALIGN_LEFT });
+                    ws.mergeCells(`J${row}:L${row}`); setCell(ws, `J${row}`, cte.origem, { align: ALIGN_LEFT });
+                    ws.mergeCells(`M${row}:O${row}`); setCell(ws, `M${row}`, cte.destino, { align: ALIGN_LEFT });
+                    setCell(ws, `P${row}`, cte.peso, { align: ALIGN_RIGHT, numFmt: NUMFMT_MONEY });
+                    setCell(ws, `Q${row}`, cte.valor, { align: ALIGN_RIGHT, numFmt: NUMFMT_MONEY });
+                    setCell(ws, `R${row}`, cte.bcIcms, { align: ALIGN_RIGHT, numFmt: NUMFMT_MONEY });
+                    ws.mergeCells(`S${row}:U${row}`); setCell(ws, `S${row}`, cte.valorIcms, { align: ALIGN_RIGHT, numFmt: NUMFMT_MONEY });
+                    setCell(ws, `V${row}`, cte.status, { align: ALIGN_RIGHT });
+                    row++;
+                });
+
+                pesoTotal += subPeso; valorTotal += subValor; bcTotal += subBC; icmsTotal += subICMS;
+            }
+
+            row++; // linha em branco
+
+            const totais = [
+                ['Peso Bruto Total (KG):', pesoTotal],
+                ['Valor Total:', valorTotal],
+                ['Base de Cálculo:', bcTotal],
+                ['Valor ICMS:', icmsTotal]
+            ];
+            totais.forEach(([label, valor]) => {
+                ws.mergeCells(`Q${row}:T${row}`); setCell(ws, `Q${row}`, label, { font: FONT_LABEL10, align: ALIGN_RIGHT });
+                ws.mergeCells(`U${row}:V${row}`); setCell(ws, `U${row}`, valor, { font: FONT_LABEL10, align: ALIGN_RIGHT, numFmt: NUMFMT_MONEY });
+                row++;
+            });
+        }
+
+        async function gerarArquivosExcel() {
+            const grupos = new Map();
+
+            for (const [key, cte] of state.ctes) {
+                const grupoKey = `${cte.cnpjEmit}|${cte.serie}`;
+                if (!grupos.has(grupoKey)) {
+                    grupos.set(grupoKey, {
+                        cnpjEmit: cte.cnpjEmit,
+                        xNomeEmit: cte.xNomeEmit,
+                        serie: cte.serie,
+                        ctes: []
+                    });
+                }
+                grupos.get(grupoKey).ctes.push(cte);
+            }
+
+            for (const [grupoKey, grupo] of grupos) {
+                const ctesPorPlaca = new Map();
+                grupo.ctes.forEach(cte => {
+                    const placa = cte.placa || 'SEM_PLACA';
+                    if (!ctesPorPlaca.has(placa)) ctesPorPlaca.set(placa, []);
+                    ctesPorPlaca.get(placa).push(cte);
+                });
+
+                const workbook = new ExcelJS.Workbook();
+                const ws = workbook.addWorksheet('Dados Consolidados');
+                montarPlanilha(ws, grupo, ctesPorPlaca);
+
+                const buffer = await workbook.xlsx.writeBuffer();
+
+                const cnpjLimpo = grupo.cnpjEmit.replace(/[.\/-]/g, '');
+                const nomeLimpo = limparNomeArquivo(grupo.xNomeEmit);
+                const fileName = `${cnpjLimpo}-${nomeLimpo}-Serie${grupo.serie}.xlsx`;
+
+                state.buffers.set(fileName, buffer);
+                state.generatedFiles.push({
+                    fileName,
+                    qtdCtes: grupo.ctes.length,
+                    qtdCancelados: grupo.ctes.filter(c => c.status === 'Cancelado').length,
+                    qtdSemPlaca: grupo.ctes.filter(c => !c.placa).length
+                });
+            }
+        }
+
+        function mostrarResultados() {
+            elements.resultsList.innerHTML = '';
+            state.generatedFiles.forEach(file => {
+                const item = document.createElement('div');
+                item.className = 'result-item';
+                item.innerHTML = `
+                    <div class="result-name">${file.fileName}</div>
+                    <div class="result-detail">
+                        ${file.qtdCtes} CTe(s) | ${file.qtdCancelados} cancelado(s)${file.qtdSemPlaca > 0 ? ' | ' + file.qtdSemPlaca + ' sem placa identificada' : ''}
+                    </div>
+                `;
+                elements.resultsList.appendChild(item);
+            });
+            elements.resultsBox.classList.add('show');
+        }
+
+        async function downloadAllAsZip() {
+            if (state.buffers.size === 0) {
+                showError('Nenhum arquivo para baixar');
+                return;
+            }
+            try {
+                const zip = new JSZip();
+                const dataHora = new Date().toISOString().split('T')[0];
+
+                for (const [fileName, buffer] of state.buffers) {
+                    zip.file(fileName, buffer);
+                }
+
+                const zipBlob = await zip.generateAsync({ type: 'blob' });
+                const url = URL.createObjectURL(zipBlob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `CTe-Consolidados-${dataHora}.zip`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                showSuccess(`✅ ZIP com ${state.buffers.size} arquivo(s) baixado com sucesso!`);
+            } catch (error) {
+                showError(`Erro ao criar ZIP: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>
