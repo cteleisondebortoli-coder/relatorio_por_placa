@@ -6,6 +6,8 @@
     <title>Consolidador CTe → Excel</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -146,7 +148,7 @@
 <body>
     <div class="container">
         <h1>📊 Consolidador CTe</h1>
-        <p class="subtitle">XMLs → Excel por CNPJ + Série (layout LogCTe)</p>
+        <p class="subtitle">XMLs → Excel + PDF por CNPJ + Série (layout LogCTe)</p>
 
         <div class="message-box message-error" id="errorMessage"></div>
         <div class="message-box message-success" id="successMessage"></div>
@@ -194,6 +196,7 @@
             cancelados: new Set(),
             generatedFiles: [],
             buffers: new Map(),
+            pdfBuffers: new Map(),
             avisos: new Set()
         };
 
@@ -268,6 +271,7 @@
             state.cancelados.clear();
             state.generatedFiles = [];
             state.buffers.clear();
+            state.pdfBuffers.clear();
             state.avisos.clear();
             elements.fileInput.value = '';
             updateFileList();
@@ -304,6 +308,7 @@
             state.cancelados.clear();
             state.generatedFiles = [];
             state.buffers.clear();
+            state.pdfBuffers.clear();
             state.avisos.clear();
             elements.progressContainer.classList.remove('hidden');
             elements.resultsBox.classList.remove('show');
@@ -516,6 +521,9 @@
                     if (cte.chave === evento.chave) {
                         cte.status = 'Cancelado';
                         state.cancelados.add(key);
+                        // A linha mantém os dados originais do CT-e (para conferência/auditoria).
+                        // A exclusão dos cancelados das somas acontece na montagem do relatório
+                        // (xlsx e pdf) — ver uso de "Autorizado" abaixo.
                     }
                 }
             });
@@ -531,8 +539,10 @@
 
         // ===================== GERAÇÃO DO EXCEL (layout fiel ao RelMovCTe) =====================
 
-        // Larguras de coluna extraídas do arquivo de exemplo (A..V, 22 colunas)
-        const COL_WIDTHS = [1.0, 6.86, 8.0, 3.0, 9.71, 19.57, 4.28, 12.71, 25.14, 6.86, 2.28, 5.71, 6.86, 5.71, 2.28, 8.86, 7.0, 8.0, 1.29, 4.57, 1.14, 7.86];
+        // Larguras de coluna baseadas no arquivo de exemplo (A..V, 22 colunas).
+        // Emissao, Peso Bruto, Valor, BC ICMS e ValorICMS foram alargadas em relação
+        // ao original para não estourar em "####" quando os valores são maiores.
+        const COL_WIDTHS = [1.0, 6.86, 11.0, 3.0, 9.71, 19.57, 4.28, 12.71, 25.14, 6.86, 2.28, 5.71, 6.86, 5.71, 2.28, 15.0, 13.0, 13.0, 3.0, 10.0, 3.0, 9.0];
 
         const FONT_TITLE = { name: 'Arial', size: 18 };
         const FONT_LABEL10 = { name: 'Arial', size: 10 };
@@ -540,9 +550,9 @@
         const FONT_8 = { name: 'Arial', size: 8 };
 
         const ALIGN_LEFT_WRAP = { horizontal: 'left', vertical: 'middle', wrapText: true };
-        const ALIGN_LEFT = { horizontal: 'left', vertical: 'bottom' };
-        const ALIGN_RIGHT = { horizontal: 'right', vertical: 'bottom' };
-        const ALIGN_CENTER = { horizontal: 'center', vertical: 'bottom' };
+        const ALIGN_LEFT = { horizontal: 'left', vertical: 'bottom', wrapText: false };
+        const ALIGN_RIGHT = { horizontal: 'right', vertical: 'bottom', wrapText: false };
+        const ALIGN_CENTER = { horizontal: 'center', vertical: 'bottom', wrapText: false };
 
         const FILL_GRAY = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC0C0C0' } };
         const NUMFMT_MONEY = '#,##0.00';
@@ -594,10 +604,13 @@
             let pesoTotal = 0, valorTotal = 0, bcTotal = 0, icmsTotal = 0;
 
             for (const [placa, ctes] of ctesPorPlaca) {
-                const subPeso = ctes.reduce((s, c) => s + c.peso, 0);
-                const subValor = ctes.reduce((s, c) => s + c.valor, 0);
-                const subBC = ctes.reduce((s, c) => s + c.bcIcms, 0);
-                const subICMS = ctes.reduce((s, c) => s + c.valorIcms, 0);
+                // Soma dos totais considera apenas CTes com status "Autorizado".
+                // As linhas continuam listando todos os CTes (inclusive cancelados).
+                const autorizados = ctes.filter(c => c.status === 'Autorizado');
+                const subPeso = autorizados.reduce((s, c) => s + c.peso, 0);
+                const subValor = autorizados.reduce((s, c) => s + c.valor, 0);
+                const subBC = autorizados.reduce((s, c) => s + c.bcIcms, 0);
+                const subICMS = autorizados.reduce((s, c) => s + c.valorIcms, 0);
 
                 // Linha "Placa Tracionador" com fundo cinza
                 ws.mergeCells(`B${row}:D${row}`); setCell(ws, `B${row}`, 'Placa Tracionador:', { font: FONT_LABEL10, align: ALIGN_RIGHT, fill: FILL_GRAY });
@@ -653,6 +666,124 @@
             });
         }
 
+        // ===================== GERAÇÃO DO PDF (versão para impressão) =====================
+
+        function montarPDF(grupo, ctesPorPlaca) {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            const margin = 8;
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(14);
+            doc.text('RELATÓRIO DE MOVIMENTAÇÃO - ANALÍTICO - VEÍCULO', margin, 14);
+
+            doc.setFontSize(9);
+            doc.text(`CNPJ: ${formatarCNPJ(grupo.cnpjEmit)}`, margin, 21);
+            doc.text(`Emissor: ${grupo.xNomeEmit}`, margin, 26);
+            doc.text(`Série: ${grupo.serie}`, margin, 31);
+
+            // Período de emissão: data mais antiga até a mais recente entre os CTes deste relatório
+            let dataMin = null, dataMax = null;
+            for (const [, ctes] of ctesPorPlaca) {
+                ctes.forEach(c => {
+                    if (!c.data) return;
+                    if (!dataMin || c.data < dataMin) dataMin = c.data;
+                    if (!dataMax || c.data > dataMax) dataMax = c.data;
+                });
+            }
+            if (dataMin && dataMax) {
+                doc.text(`Período de emissão ${formatarDataBR(dataMin)} até ${formatarDataBR(dataMax)}`, margin, 36);
+            }
+
+            const head = [[
+                'Numero', 'Emissao', 'CNPJ Remetente', 'Remetente', 'CNPJ Destinatário',
+                'Destinatário', 'Origem', 'Destino', 'Peso Bruto', 'Valor', 'BC ICMS', 'ValorICMS', 'Status'
+            ]];
+
+            const body = [];
+            let pesoTotal = 0, valorTotal = 0, bcTotal = 0, icmsTotal = 0;
+
+            for (const [placa, ctes] of ctesPorPlaca) {
+                // Soma dos totais considera apenas CTes com status "Autorizado".
+                const autorizados = ctes.filter(c => c.status === 'Autorizado');
+                const subPeso = autorizados.reduce((s, c) => s + c.peso, 0);
+                const subValor = autorizados.reduce((s, c) => s + c.valor, 0);
+                const subBC = autorizados.reduce((s, c) => s + c.bcIcms, 0);
+                const subICMS = autorizados.reduce((s, c) => s + c.valorIcms, 0);
+
+                body.push([
+                    { content: `Placa Tracionador: ${placa}`, colSpan: 8, styles: { halign: 'left', fillColor: [192, 192, 192], fontStyle: 'bold' } },
+                    { content: formatarMoeda(subPeso), styles: { halign: 'right', fillColor: [192, 192, 192], fontStyle: 'bold' } },
+                    { content: formatarMoeda(subValor), styles: { halign: 'right', fillColor: [192, 192, 192], fontStyle: 'bold' } },
+                    { content: formatarMoeda(subBC), styles: { halign: 'right', fillColor: [192, 192, 192], fontStyle: 'bold' } },
+                    { content: formatarMoeda(subICMS), styles: { halign: 'right', fillColor: [192, 192, 192], fontStyle: 'bold' } },
+                    { content: '', styles: { fillColor: [192, 192, 192] } }
+                ]);
+
+                ctes.forEach(cte => {
+                    body.push([
+                        { content: cte.numero, styles: { halign: 'center' } },
+                        { content: cte.data ? formatarDataBR(cte.data) : '', styles: { halign: 'left' } },
+                        cte.cnpjRem, cte.xNomeRem, cte.cnpjDest, cte.xNomeDest, cte.origem, cte.destino,
+                        { content: formatarMoeda(cte.peso), styles: { halign: 'right' } },
+                        { content: formatarMoeda(cte.valor), styles: { halign: 'right' } },
+                        { content: formatarMoeda(cte.bcIcms), styles: { halign: 'right' } },
+                        { content: formatarMoeda(cte.valorIcms), styles: { halign: 'right' } },
+                        { content: cte.status, styles: { halign: 'right', textColor: cte.status === 'Cancelado' ? [200, 0, 0] : [0, 0, 0] } }
+                    ]);
+                });
+
+                pesoTotal += subPeso; valorTotal += subValor; bcTotal += subBC; icmsTotal += subICMS;
+            }
+
+            doc.autoTable({
+                head, body,
+                startY: 41,
+                margin: { left: margin, right: margin },
+                theme: 'grid',
+                styles: { font: 'helvetica', fontSize: 7, cellPadding: 1.2, overflow: 'linebreak', lineColor: [200, 200, 200], lineWidth: 0.1 },
+                headStyles: { fillColor: [102, 126, 234], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+                columnStyles: {
+                    0: { cellWidth: 14 }, 1: { cellWidth: 18 }, 2: { cellWidth: 'auto' }, 3: { cellWidth: 'auto' },
+                    4: { cellWidth: 'auto' }, 5: { cellWidth: 'auto' }, 6: { cellWidth: 'auto' }, 7: { cellWidth: 'auto' },
+                    8: { cellWidth: 'auto' }, 9: { cellWidth: 'auto' }, 10: { cellWidth: 'auto' }, 11: { cellWidth: 'auto' }, 12: { cellWidth: 'auto' }
+                }
+            });
+
+            let y = doc.lastAutoTable.finalY + 8;
+            doc.setFontSize(9);
+            [
+                ['Peso Bruto Total (KG):', pesoTotal],
+                ['Valor Total:', valorTotal],
+                ['Base de Cálculo:', bcTotal],
+                ['Valor ICMS:', icmsTotal]
+            ].forEach(([label, valor]) => {
+                doc.text(`${label} ${formatarMoeda(valor)}`, doc.internal.pageSize.getWidth() - margin, y, { align: 'right' });
+                y += 5;
+            });
+
+            // Numeração "Página X de N" — só dá pra saber N depois que tudo foi renderizado
+            const totalPaginas = doc.internal.getNumberOfPages();
+            const pageSize = doc.internal.pageSize;
+            for (let i = 1; i <= totalPaginas; i++) {
+                doc.setPage(i);
+                doc.setFontSize(7);
+                doc.text(`Página ${i} de ${totalPaginas}`, margin, pageSize.getHeight() - 4, { align: 'left' });
+            }
+
+            return doc.output('arraybuffer');
+        }
+
+        function formatarMoeda(v) {
+            return (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function formatarDataBR(d) {
+            const dia = String(d.getDate()).padStart(2, '0');
+            const mes = String(d.getMonth() + 1).padStart(2, '0');
+            return `${dia}/${mes}/${d.getFullYear()}`;
+        }
+
         async function gerarArquivosExcel() {
             const grupos = new Map();
 
@@ -682,14 +813,16 @@
                 montarPlanilha(ws, grupo, ctesPorPlaca);
 
                 const buffer = await workbook.xlsx.writeBuffer();
+                const pdfBuffer = montarPDF(grupo, ctesPorPlaca);
 
                 const cnpjLimpo = grupo.cnpjEmit.replace(/[.\/-]/g, '');
                 const nomeLimpo = limparNomeArquivo(grupo.xNomeEmit);
-                const fileName = `${cnpjLimpo}-${nomeLimpo}-Serie${grupo.serie}.xlsx`;
+                const baseName = `${cnpjLimpo}-${nomeLimpo}-Serie${grupo.serie}`;
 
-                state.buffers.set(fileName, buffer);
+                state.buffers.set(`${baseName}.xlsx`, buffer);
+                state.pdfBuffers.set(`${baseName}.pdf`, pdfBuffer);
                 state.generatedFiles.push({
-                    fileName,
+                    fileName: baseName,
                     qtdCtes: grupo.ctes.length,
                     qtdCancelados: grupo.ctes.filter(c => c.status === 'Cancelado').length,
                     qtdSemPlaca: grupo.ctes.filter(c => !c.placa).length
@@ -703,7 +836,7 @@
                 const item = document.createElement('div');
                 item.className = 'result-item';
                 item.innerHTML = `
-                    <div class="result-name">${file.fileName}</div>
+                    <div class="result-name">${file.fileName}.xlsx + .pdf</div>
                     <div class="result-detail">
                         ${file.qtdCtes} CTe(s) | ${file.qtdCancelados} cancelado(s)${file.qtdSemPlaca > 0 ? ' | ' + file.qtdSemPlaca + ' sem placa identificada' : ''}
                     </div>
@@ -714,7 +847,7 @@
         }
 
         async function downloadAllAsZip() {
-            if (state.buffers.size === 0) {
+            if (state.buffers.size === 0 && state.pdfBuffers.size === 0) {
                 showError('Nenhum arquivo para baixar');
                 return;
             }
@@ -723,6 +856,9 @@
                 const dataHora = new Date().toISOString().split('T')[0];
 
                 for (const [fileName, buffer] of state.buffers) {
+                    zip.file(fileName, buffer);
+                }
+                for (const [fileName, buffer] of state.pdfBuffers) {
                     zip.file(fileName, buffer);
                 }
 
@@ -736,7 +872,8 @@
                 document.body.removeChild(link);
                 URL.revokeObjectURL(url);
 
-                showSuccess(`✅ ZIP com ${state.buffers.size} arquivo(s) baixado com sucesso!`);
+                const total = state.buffers.size + state.pdfBuffers.size;
+                showSuccess(`✅ ZIP com ${total} arquivo(s) (xlsx + pdf) baixado com sucesso!`);
             } catch (error) {
                 showError(`Erro ao criar ZIP: ${error.message}`);
             }
